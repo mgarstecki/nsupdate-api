@@ -43,6 +43,20 @@ class DnsUpdateApiHandler(BaseHTTPServer.BaseHTTPRequestHandler):
         if nsupdate.returncode != 0:
             raise UpdateFailedError("The update failed", nsupdate_data[1])
 
+    def delete_name(self, name):
+        delete_input="""
+        update delete %(name)s.%(zone)s. A
+        send
+        """ % {"zone": "archinext.local", "name": name}
+
+        print delete_input
+
+        nsupdate = Popen(["nsupdate", "-l"], stdout=PIPE, stdin=PIPE, stderr=PIPE)
+        nsupdate_data = nsupdate.communicate(input=delete_input)
+
+        if nsupdate.returncode != 0:
+            raise UpdateFailedError("The delete failed", nsupdate_data[1])
+
     def get_name_prefix(self, name):
         match = prefixRegex.match(name)
         if match:
@@ -103,6 +117,68 @@ class DnsUpdateApiHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write("Update succesful\n")
+            self.wfile.write(shortHostname)
+            self.wfile.write(" -> ")
+            self.wfile.write(self.client_address[0])
+
+    def get_ip_for_name(self, name):
+        dig = Popen(["dig", "+aa", "+short", name + ".archinext.local"], stdout=PIPE, stdin=None, stderr=PIPE)
+        dig_data = dig.communicate()
+
+        if dig.returncode != 0:
+            raise UpdateFailedError("Dig check for name failed", dig_data[1])
+        found_ip = dig_data[0].strip()
+
+        if found_ip:
+            return found_ip
+        else:
+            return None
+
+    def accept_delete(self, ip, name):
+        record_ip = self.get_ip_for_name(name)
+
+        if not record_ip:
+            raise UpdateRejectedError("No record found for the given hostname")
+
+        record_ip = IPAddress(record_ip)
+        client_ip = IPAddress(ip)
+
+        if not record_ip == client_ip:
+            raise UpdateRejectedError("Your IP does not match the stored IP for the given name")
+
+    def do_DELETE(self):
+        """ Respond to a DELETE request: delete a record from the DNS server."""
+        self.send_header("Content-type", "text/plain")
+
+        shortHostname = os.path.basename(self.path)
+        print shortHostname
+
+        try:
+            self.accept_delete(self.client_address[0], shortHostname)
+            self.delete_name(shortHostname)
+        except UpdateRejectedError as e:
+            self.log_failure(e)
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write("Delete request rejected.\n")
+            self.wfile.write("Reason: " + e.args[0])
+        except UpdateFailedError as e:
+            self.log_failure(e)
+            self.send_response(502)
+            self.end_headers()
+            self.wfile.write("Delete request failed.\n")
+            self.wfile.write("Error log:\n")
+            self.wfile.write(e.stderr)
+        except Exception as e:
+            self.log_failure(e)
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write("An unexpected error has occured.\n")
+            self.wfile.write("Error message: " + e.args[0])
+        else:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write("Delete succesful\n")
             self.wfile.write(shortHostname)
             self.wfile.write(" -> ")
             self.wfile.write(self.client_address[0])
