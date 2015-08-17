@@ -122,7 +122,7 @@ class DnsUpdateApiHandler(BaseHTTPServer.BaseHTTPRequestHandler):
             self.wfile.write(self.client_address[0])
 
     def get_ip_for_name(self, name):
-        dig = Popen(["dig", "+aa", "+short", name + ".archinext.local"], stdout=PIPE, stdin=None, stderr=PIPE)
+        dig = Popen(["dig", "+aa", "+short", name + ".archinext.local", "@127.0.0.1"], stdout=PIPE, stdin=None, stderr=PIPE)
         dig_data = dig.communicate()
 
         if dig.returncode != 0:
